@@ -42,7 +42,9 @@
                 ptr;                            \
          })
 
-#define _simd_align(x)   ((((intptr_t)x) + ((0x01 << 4) - 1)) & ~((0x01 << 4) - 1))
+#define _simd_align(x)          ((((intptr_t)x) + ((0x01 << 4) - 1)) & ~((0x01 << 4) - 1))
+#define _ptr_offset(x, y)       (((intptr_t)(x)) - ((intptr_t)(y)))
+#define _likely(x)              __builtin_expect(!!(x), 1)
 
 struct _chunk_info {
         float           *d;
@@ -77,7 +79,7 @@ uint32_t        _enable_bitonic_sort = 1;
 static int32_t _compare_float(const void *a, const void *b);
 
 void
-bitonic_sort(float *d, uint32_t s, float *buf, uint32_t chunk_num)
+bitonic_sort(float *d, uint32_t s, float *buf, uint32_t chunk_num /* Must be the number of hardware threads */)
 {
         int32_t         i;
         uint32_t        chk;
@@ -130,7 +132,6 @@ bitonic_sort(float *d, uint32_t s, float *buf, uint32_t chunk_num)
                         pthread_join(tid[i], NULL);
 
                 /* Merge left chunks */
-                /* TODO: To improve parallism, or impliment multi-way merge-sort */
                 _bitonic_merge(d, s, buf, chk);
 
                 free(chunk_info);
@@ -516,19 +517,37 @@ _bitonic_merge_kernel16n(float *dest, float *a, float *b /* must not be reversed
 
 	for(; dest < (last_dest - 16); dest += 16) {
                 /* Load either a or b */
-		if(a < last_a) {
-			if(b < last_b) {
-				if(*a < *b) {
-					LOAD16(a);
-				} else { 
-					LOAD16(b);
-				}
-			} else {
-				LOAD16(a);
-			}
-		} else {
-			LOAD16(b);
-		}
+                if(_likely(a < last_a)) {
+                        if(_likely(b < last_b)) {
+                                if(*a < *b) {
+                                        LOAD16(a);
+                                } else { 
+                                        LOAD16(b);
+                                }
+                        } else {
+#ifdef SKEW_OPT
+                                if (_likely(dest[15] > a[0])) {
+                                        LOAD16(a);
+                                } else {
+                                        _fast_memcpy(dest + 16, a, _ptr_offset(last_a, a));
+                                        break;
+                                }
+#else
+                                LOAD16(a);
+#endif /* SKEY_OPT */
+                        }
+                } else {
+#ifdef SKEW_OPT
+                        if (_likely(dest[15] > b[0])) {
+                                LOAD16(b);
+                        } else {
+                                _fast_memcpy(dest + 16, b, _ptr_offset(last_b, b));
+                                break;
+                        }
+#else
+                        LOAD16(b);
+#endif /* SKEY_OPT */
+                }
 
                 mb[0] = _mm_shuffle_ps(mb[0], mb[0], 0x1b);
                 mb[1] = _mm_shuffle_ps(mb[1], mb[1], 0x1b);
