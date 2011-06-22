@@ -1,0 +1,8 @@
+A bitonic sort technique consists of many comparators.
+Although time complexity is high, N_(log2_N)^2, the structure
+of bitonic sorters is definitely suitable for SIMD instructions.
+Particulay, the smaller the amount of data are, more efficient 
+this technique is.
+
+More details in 
+http://portal.acm.org/citation.cfm?id=1454171
